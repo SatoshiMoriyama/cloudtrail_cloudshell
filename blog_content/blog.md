@@ -1,10 +1,12 @@
-# CloudShell上でのS3操作をCloudTrailでどうやって検知するか調査してみた
-
 ## はじめに
 
-AWS CloudShell は便利なブラウザベースのシェル環境です。
+こんにちは。
 
-最近、「CloudShell 上で実行された S3 操作をどうやって追跡するか」という課題が出てきたので調査してみました。
+アプリケーションサービス本部ディベロップメントサービス１課の森山です。
+
+最近、「AWS CloudShell 上で実行された S3 操作をどうやって追跡するか」という課題が出てきたので調査してみました。
+
+AWS CloudShell は便利なブラウザベースのシェル環境です。
 
 CloudShell で投入したコマンド自体は CloudTrail、CloudWatch Logs 等に自動保管されないことは知っていましたが、詳細を把握していませんでした。
 
@@ -12,10 +14,9 @@ CloudShell で投入したコマンド自体は CloudTrail、CloudWatch Logs 等
 
 ### この記事で学べること
 
-- CloudShell 起動時に記録される CloudTrail イベントの種類
+- CloudShell 起動時に記録される CloudTrail イベントの種類(一部)
 - CloudShell 経由の S3 データイベントを CloudTrail Lake で検知する方法
 - userAgent から CloudShell 経由であることを特定する方法
-- CloudShell のコマンド履歴が記録されない理由と代替手段
 - CloudShell からのファイルダウンロード操作の検知方法
 
 ### 前提知識・条件
@@ -29,16 +30,16 @@ CloudShell で投入したコマンド自体は CloudTrail、CloudWatch Logs 等
 
 結論は以下です。
 
-- CloudShell 起動時のイベントは `cloudshell.amazonaws.com` として記録される
+- CloudShell の イベントソース`cloudshell.amazonaws.com` として記録される
   - `CreateSession` 等のイベントから誰が使用したかを追跡可能
-- CloudShell 上での S3 操作ログは `s3.amazonaws.com` として他の操作と同様な形で保持される
+- CloudShell 上での S3 操作ログは イベントソース`s3.amazonaws.com` として他の操作と同様な形で保持される
   - データイベントについては、CloudTrail Lake や証跡機能の利用が必要
 - `s3.amazonaws.com` イベント内の `userAgent` を見れば CloudShell 経由かを判別可能
   - `exec-env/CloudShell` という文字列が含まれている
 - コマンド文字列（`aws s3 cp` など）やコマンドの実行結果は CloudTrail に記録されない
   - `.bash_history` はユーザー本人のみアクセス可能
   - CloudShell のホームディレクトリは 120 日間未使用で自動削除される
-- コマンドレベルの監査が必要な場合は Systems Manager セッション Manager を使用
+- コマンドレベルの監査が必要な場合は AWS Systems Manager Session Managerを使用する
   - CloudWatch Logs または S3 にセッションログを記録可能
 
 ## やってみた
@@ -51,15 +52,18 @@ CloudShell のイベントについては、特に事前準備は不要で、マ
 
 ただし、S3 のデータイベントについては上記画面からは確認できないため、今回は AWS CloudTrail Lake の機能を使って確認します。
 
-https://docs.aws.amazon.com/ja_jp/awscloudtrail/latest/userguide/cloudtrail-lake.html
 
-簡単に作成可能なので、詳細な作成手順は割愛します。保持するイベントを設定する箇所にて、データイベントを有効にし、リソースタイプが `S3` の物を保持する設定にしておく必要があります。
+[https://docs.aws.amazon.com/ja_jp/awscloudtrail/latest/userguide/cloudtrail-lake.html:embed:cite]
+
+簡単に作成可能なので、詳細な作成手順は割愛します。
+
+保持するイベントを設定する箇所にて、データイベントを有効にし、リソースタイプが `S3` を保持する設定にしておく必要があります。
 
 ![alt text](<CleanShot 2026-01-28 at 06.42.23@2x.png>)
 
 ![alt text](<CleanShot 2026-01-28 at 06.42.34@2x.png>)
 
-### CloudShellを開く
+### CloudShell を開く
 
 では、実際に動作確認をしていきます。
 
@@ -98,7 +102,7 @@ CloudShell は 2 通りの起動方法があり、それぞれコンソールの
 
 今回は CloudShell の環境を全て削除した状態での接続なので、すでに環境がある場合などは出力されるイベントは異なります。
 
-誰かが CloudShell を使ったかという確認をするのであれば、`CreateSession` のイベントレコードを確認すれば良いでしょう。
+誰かが CloudShell を使ったかという確認をするのであれば、`CreateSession` のイベントレコードを確認すれば良さそうです。
 
 以下、`CreateSession` のイベントレコード内の userIdentity の値を載せておきます。
 
@@ -128,18 +132,18 @@ CloudShell は 2 通りの起動方法があり、それぞれコンソールの
 }
 ```
 
-また任意のコマンドを投入しても、それを記録するようなイベントは出力されていません。
+またCloudShell上で任意のコマンドを投入しても、それを記録するようなイベントは出力されていません。
 
-コマンド履歴を確認する場合は、`.bash_history` を確認する、または AWS Systems Manager セッション Manager を利用する必要があります。
+コマンド履歴を確認する場合は、`.bash_history` を確認する、または AWS Systems Manager Session Managerを利用する必要があります。
 
 https://docs.aws.amazon.com/ja_jp/systems-manager/latest/userguide/session-manager.html
 
-### CloudShell上でS3コマンドを実行してみる
+### CloudShell 上で S3 コマンドを実行してみる
 
 次に以下のコマンドを CloudShell 上から投入し、任意のファイルをダウンロードしてみます。
 
 ```bash
-aws s3 cp s3://....
+aws s3 cp s3://[任意のファイル]
 ```
 
 投入後、CloudTrail Lake で以下のクエリを実行し、S3 のデータイベントを確認してみます。
@@ -163,7 +167,7 @@ WHERE
 ORDER BY eventTime DESC
 ```
 
-※ `<your-event-data-store-id>` は、作成したイベントデータストアの ID に置き換えてください。
+※ `<your-event-data-store-id>` は、作成したイベントデータストアの ID
 
 `GetObject`、`HeadObject` のイベントが確認できました。
 
@@ -176,15 +180,16 @@ aws-cli/2.33.5 md/awscrt#0.29.1 ua/2.1 os/linux#6.1.159-181.297.amzn2023.x86_64 
 ```
 
 `exec-env/CloudShell` という文字列から CloudShell からの実行であることがわかります。
+
 CloudShell 経由の操作でフィルタリングしたい場合は、`exec-env/CloudShell` の有無をチェックすれば良さそうですね。
 
-### CloudShellからのデータダウンロード
+### CloudShell からのデータダウンロード
 
 CloudShell には、下記の通り、データをローカルにダウンロード機能があります。
 
 ![alt text](<CleanShot 2026-01-28 at 06.32.08@2x.png>)
 
-この操作時には、`GetFileDownloadUrls` イベントが発生しますので、S3 から取得したデータを持ち出していないことの証跡とできます。
+この操作時には、`GetFileDownloadUrls` イベントが発生しますので、S3 から取得したデータを持ち出していないことの証跡とすることができます。
 
 ![alt text](<CleanShot 2026-01-28 at 06.35.33@2x.png>)
 
@@ -213,3 +218,5 @@ ORDER BY eventTime DESC
 ```
 
 さらにコマンド履歴や、`GetFileDownloadUrls` イベントが発生していないことを確認すれば CloudShell 上のみで安全にデータを操作していることを確認できます。
+
+誰かのお役に立てば幸いです。
